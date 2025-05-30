@@ -22,19 +22,71 @@ from reportlab.pdfgen import canvas
 
 
 # Fichier de sauvegarde
-SAVE_FILE = "glove_voice_data.json"
+SAVE_FILE = "report_data.json"
+
+# Initialiser la session_state si ce n'est pas déjà fait
+if 'user_data' not in st.session_state:
+    st.session_state.user_data = {}
 
 # Charger les données existantes
 def load_data():
-    if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, "r", encoding='utf-8') as f:
-            return json.load(f)
+    # Vérifier si nous avons déjà des données dans la session
+    if st.session_state.user_data:
+        return st.session_state.user_data
+    
+    # Sinon, essayer de charger depuis le fichier local (pour développement)
+    elif os.path.exists(SAVE_FILE):
+        try:
+            with open(SAVE_FILE, "r", encoding='utf-8') as f:
+                # Charger les données depuis le fichier et les stocker dans la session
+                st.session_state.user_data = json.load(f)
+                return st.session_state.user_data
+        except:
+            return {}
     return {}
 
 # Sauvegarder les données
 def save_data(data):
-    with open(SAVE_FILE, "w", encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    # Sauvegarder dans la session state (persistante pendant la session utilisateur)
+    st.session_state.user_data = data
+    
+    # Sauvegarder également dans un fichier local (utile pour le développement)
+    try:
+        with open(SAVE_FILE, "w", encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except:
+        pass  # Si l'écriture de fichier échoue (comme sur Streamlit Cloud), on ignore simplement
+
+# Permettre à l'utilisateur d'exporter ses données
+def export_data():
+    if st.sidebar.button("Exporter mes données"):
+        # Convertir les données en JSON pour téléchargement
+        json_data = json.dumps(st.session_state.user_data, ensure_ascii=False, indent=4)
+        
+        # Proposer le téléchargement
+        st.sidebar.download_button(
+            label="⬇️ Télécharger ma sauvegarde",
+            data=json_data,
+            file_name="ma_sauvegarde_rapport.json",
+            mime="application/json"
+        )
+
+# Permettre à l'utilisateur d'importer des données
+def import_data():
+    uploaded_file = st.sidebar.file_uploader("Importer une sauvegarde", type=['json'])
+    if uploaded_file is not None:
+        try:
+            # Lire et charger le contenu du fichier
+            content = uploaded_file.read().decode('utf-8')
+            data = json.loads(content)
+            
+            # Mettre à jour les données de session
+            st.session_state.user_data = data
+            
+            st.sidebar.success("Sauvegarde importée avec succès!")
+            st.rerun()  # Actualiser pour afficher les données importées
+        except Exception as e:
+            st.sidebar.error(f"Erreur lors de l'importation: {str(e)}")
 
 # Charger les anciennes entrées
 saved_data = load_data()
@@ -1665,6 +1717,51 @@ if st.sidebar.button("📄 Générer un PDF du rapport"):
         mime="application/pdf"
     )
 
+# Section pour la gestion des sauvegardes locales
+st.sidebar.markdown("---")
+st.sidebar.subheader("Mes données")
+
+# Exporter les données
+if st.sidebar.button("💾 Exporter ma sauvegarde"):
+    # Convertir les données en JSON pour téléchargement
+    json_data = json.dumps(st.session_state.user_data, ensure_ascii=False, indent=4)
+    
+    # Proposer le téléchargement
+    st.sidebar.download_button(
+        label="⬇️ Télécharger ma sauvegarde",
+        data=json_data,
+        file_name="ma_sauvegarde_glove_voice.json",
+        mime="application/json"
+    )
+
+# Importer les données
+uploaded_file = st.sidebar.file_uploader("Importer une sauvegarde", type=['json'], key="file_uploader")
+if uploaded_file is not None:
+    try:
+        # Lire et charger le contenu du fichier
+        content = uploaded_file.read().decode('utf-8')
+        imported_data = json.loads(content)
+        
+        # Bouton pour confirmer l'importation
+        if st.sidebar.button("📥 Appliquer la sauvegarde"):
+            # Mettre à jour les données de session
+            st.session_state.user_data = imported_data
+            saved_data.update(imported_data)  # Mettre à jour les données actuelles
+            
+            st.sidebar.success("Sauvegarde importée avec succès!")
+            st.experimental_rerun()  # Actualiser pour afficher les données importées
+    except Exception as e:
+        st.sidebar.error(f"Erreur lors de l'importation: {str(e)}")
+
+# Bouton pour effacer toutes les données
+if st.sidebar.button("🗑️ Réinitialiser mes données"):
+    # Afficher une demande de confirmation
+    confirmation = st.sidebar.checkbox("Confirmer la réinitialisation")
+    if confirmation:
+        st.session_state.user_data = {}  # Vider les données
+        saved_data.clear()  # Vider les données actuelles
+        st.sidebar.success("Données réinitialisées!")
+        st.experimental_rerun()
 # Page 1: Présentation du Projet
 if page == "Présentation du Projet":
     # Ajout d'un input pour changer le titre du projet
