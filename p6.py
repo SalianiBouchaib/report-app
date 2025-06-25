@@ -1,7 +1,7 @@
 import streamlit as st
 # Configuration de la page
 st.set_page_config(
-    page_title="Rapport ",
+    page_title="Rapport",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import io
+from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage
@@ -20,79 +21,80 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.pdfgen import canvas
 
 
-
-# Fichier de sauvegarde
-SAVE_FILE = "report_data.json"
-
 # Initialiser la session_state si ce n'est pas déjà fait
 if 'user_data' not in st.session_state:
     st.session_state.user_data = {}
 
 # Charger les données existantes
 def load_data():
+    """
+    Charge les données existantes depuis la session ou un fichier local
+    """
     # Vérifier si nous avons déjà des données dans la session
-    if st.session_state.user_data:
+    if 'user_data' in st.session_state and st.session_state.user_data:
         return st.session_state.user_data
     
-    # Sinon, essayer de charger depuis le fichier local (pour développement)
-    elif os.path.exists(SAVE_FILE):
+    # Chercher les fichiers dans le dossier saved_data
+    save_dir = "saved_data"
+    if os.path.exists(save_dir):
         try:
-            with open(SAVE_FILE, "r", encoding='utf-8') as f:
-                # Charger les données depuis le fichier et les stocker dans la session
-                st.session_state.user_data = json.load(f)
-                return st.session_state.user_data
-        except:
-            return {}
+            # Trouver le fichier le plus récent
+            files = [os.path.join(save_dir, f) for f in os.listdir(save_dir) if f.endswith('.json')]
+            if files:
+                newest_file = max(files, key=os.path.getctime)
+                with open(newest_file, "r", encoding='utf-8') as f:
+                    st.session_state.user_data = json.load(f)
+                    return st.session_state.user_data
+        except Exception as e:
+            st.warning(f"Erreur lors du chargement depuis le fichier: {str(e)}")
+    
     return {}
 
 # Sauvegarder les données
 def save_data(data):
+    """
+    Sauvegarde les données dans un fichier JSON avec un nom de fichier unique basé sur le nom de l'entreprise et un horodatage
+    """
     # Sauvegarder dans la session state (persistante pendant la session utilisateur)
     st.session_state.user_data = data
     
-    # Sauvegarder également dans un fichier local (utile pour le développement)
+    # Créer le dossier de sauvegarde s'il n'existe pas
+    save_dir = "saved_data"
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Générer un nom de fichier unique
+    company_name = data.get('ident_rs', 'entreprise').replace(" ", "_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{save_dir}/{company_name}_{timestamp}.json"
+    
+    # Sauvegarder dans un fichier local
     try:
-        with open(SAVE_FILE, "w", encoding='utf-8') as f:
+        with open(filename, "w", encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-    except:
-        pass  # Si l'écriture de fichier échoue (comme sur Streamlit Cloud), on ignore simplement
+        return filename
+    except Exception as e:
+        st.warning(f"Erreur lors de la sauvegarde: {str(e)}")
+        return None
 
-# Permettre à l'utilisateur d'exporter ses données
-def export_data():
-    if st.sidebar.button("Exporter mes données"):
-        # Convertir les données en JSON pour téléchargement
-        json_data = json.dumps(st.session_state.user_data, ensure_ascii=False, indent=4)
+# Fonction pour charger des données depuis un fichier JSON
+def load_data_from_json(file):
+    """
+    Charge les données à partir d'un fichier JSON
+    """
+    try:
+        # Lire le fichier JSON
+        content = file.read().decode('utf-8')
+        data = json.loads(content)
         
-        # Proposer le téléchargement
-        st.sidebar.download_button(
-            label="⬇️ Télécharger ma sauvegarde",
-            data=json_data,
-            file_name="ma_sauvegarde_rapport.json",
-            mime="application/json"
-        )
-
-# Permettre à l'utilisateur d'importer des données
-def import_data():
-    uploaded_file = st.sidebar.file_uploader("Importer une sauvegarde", type=['json'])
-    if uploaded_file is not None:
-        try:
-            # Lire et charger le contenu du fichier
-            content = uploaded_file.read().decode('utf-8')
-            data = json.loads(content)
-            
-            # Mettre à jour les données de session
-            st.session_state.user_data = data
-            
-            st.sidebar.success("Sauvegarde importée avec succès!")
-            st.rerun()  # Actualiser pour afficher les données importées
-        except Exception as e:
-            st.sidebar.error(f"Erreur lors de l'importation: {str(e)}")
+        # Mettre à jour session_state avec les données chargées
+        st.session_state.user_data = data
+        
+        return True
+    except Exception as e:
+        raise Exception(f"Erreur lors du chargement des données: {str(e)}")
 
 # Charger les anciennes entrées
 saved_data = load_data()
-
-# Ajouter les fonctions d'export et d'import à la barre latérale
-# Ces fonctions peuvent être appelées depuis votre interface principale
 
 # Fonction pour créer des inputs avec persistance
 def create_input(label, default_value="", key=None, text_area=False, height=None):
@@ -136,24 +138,14 @@ def create_expandable_table(title, data, key):
 
 # Fonction pour créer le tableau de comparaison des concurrents avec inputs
 def create_competitor_comparison_table(key):
-    # Définir les critères et concurrents par défaut
-    default_criteres = [
-        "Traduction en temps réel", 
-        "Application mobile", 
-        "Portail web", 
-        "Support multilingue", 
-        "Formation en langue des signes", 
-        "Personnalisation pour secteurs", 
-        "Partenariats avec ONG/écoles", 
-        "Tarification différenciée"
-    ]
-    
-    default_concurrents = ["Glove Voice", "SignAll", "MotionSavvy", "Kinemic", "DuoSign", "Google Live Transcribe", "Ava"]
+    # Définir les critères et concurrents par défaut - tous vides
+    default_criteres = ["", "", "", "", "", "", "", ""]
+    default_concurrents = ["", "", "", "", "", "", ""]
     
     # Récupérer les concurrents sauvegardés ou utiliser les valeurs par défaut
     concurrents = []
-    for i, comp in enumerate(default_concurrents):
-        comp_name = create_input(f"Nom du concurrent {i+1}", comp, f"competitor_name_{i+1}")
+    for i in range(1, len(default_concurrents)+1):
+        comp_name = create_input(f"Nom du concurrent {i}", "", f"competitor_name_{i}")
         concurrents.append(comp_name)
     
     # Valeurs par défaut du tableau
@@ -162,17 +154,8 @@ def create_competitor_comparison_table(key):
     }
     
     # Ajouter les valeurs par défaut pour chaque concurrent
-    for i, comp in enumerate(default_concurrents):
-        if i == 0:  # Glove Voice
-            default_values[comp] = ["+", "+", "+", "+", "+", "+", "+", "+"]
-        elif i == 1 or i == 2:  # SignAll, MotionSavvy
-            default_values[comp] = ["+", "-", "-", "-", "-", "-", "T", "T"]
-        elif i == 4:  # DuoSign
-            default_values[comp] = ["-", "-", "-", "-", "-", "-", "T", "-"]
-        elif i == 5 or i == 6:  # Google Live Transcribe, Ava
-            default_values[comp] = ["-", "+", "-", "+", "-", "-", "-", "+"]
-        else:  # Kinemic
-            default_values[comp] = ["-", "-", "-", "-", "-", "-", "-", "-"]
+    for i, comp in enumerate(concurrents):
+        default_values[comp if comp else f"Concurrent {i+1}"] = ["", "", "", "", "", "", "", ""]
     
     # Récupérer les données sauvegardées ou utiliser les valeurs par défaut
     saved_table = saved_data.get(key, default_values)
@@ -235,73 +218,73 @@ def create_competitor_comparison_table(key):
 
 # Fonction pour créer le Business Model Canvas avec inputs
 def create_business_model_canvas(key_prefix):
-    st.write("## 7. Business Model Canvas (BMC) de Glove Voice")
+    st.write("## Business Model Canvas")
     
-    # Définir les couleurs pour chaque section du BMC (comme dans l'image)
+    # Définir les couleurs pour chaque section du BMC
     bmc_colors = {
         "partenaires": "#ffadb9",    # Rose
         "activites": "#b388ff",      # Violet
         "proposition": "#81c784",     # Vert
         "relations": "#ffb74d",      # Orange
         "segments": "#4fc3f7",       # Bleu
-        "ressources": "#b388ff",     # Violet (même que activités)
-        "canaux": "#ffb74d",         # Orange (même que relations)
+        "ressources": "#b388ff",     # Violet
+        "canaux": "#ffb74d",         # Orange
         "couts": "#ffd54f",          # Jaune
-        "revenus": "#b388ff"         # Violet (même que activités/ressources)
+        "revenus": "#b388ff"         # Violet
     }
     
     # Créer le canvas avec 3 rangées
     st.write("#### Cliquez dans chaque case pour modifier le contenu")
     
-    # Première rangée: Partenaires Clés, Activités Clés, Proposition de Valeur, Relations avec les Clients, Segments de Clientèle
+    # Première rangée: Partenaires Clés, Activités Clés, etc.
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown(f"<div style='background-color:{bmc_colors['partenaires']};padding:10px;border-radius:5px;height:250px;'>", unsafe_allow_html=True)
         st.write("**Partenaires Clés**")
         partenaires = create_input("", 
-                                 "- ONG et Associations : Pour une meilleure diffusion et impact social\n- Établissements Éducatifs : Partenariats pour intégrer Glove Voice dans leur cursus\n- Développeurs : Collaboration pour améliorer l'application", 
-                                 f"{key_prefix}_partenaires",
-                                 text_area=True)
+                                "", 
+                                f"{key_prefix}_partenaires",
+                                text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col2:
         st.markdown(f"<div style='background-color:{bmc_colors['activites']};padding:10px;border-radius:5px;height:250px;'>", unsafe_allow_html=True)
         st.write("**Activités Clés**")
         activites = create_input("", 
-                                "- Développement Produit : Amélioration continue de Glove Voice\n- Marketing et Promotion : Campagnes pour sensibiliser et attirer des clients\n- Support et Formation : Aide aux utilisateurs", 
-                                f"{key_prefix}_activites",
-                                text_area=True)
+                               "", 
+                               f"{key_prefix}_activites",
+                               text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col3:
         st.markdown(f"<div style='background-color:{bmc_colors['proposition']};padding:10px;border-radius:5px;height:250px;'>", unsafe_allow_html=True)
         st.write("**Proposition de Valeur**")
         proposition = create_input("", 
-                                  "- Traduction en temps réel de la langue des signes : Facilite la communication entre personnes sourdes et entendantes\n- Accessibilité Multilingue : Adaptation aux langues locales et internationales", 
-                                  f"{key_prefix}_proposition",
-                                  text_area=True)
+                                 "", 
+                                 f"{key_prefix}_proposition",
+                                 text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col4:
         st.markdown(f"<div style='background-color:{bmc_colors['relations']};padding:10px;border-radius:5px;height:250px;'>", unsafe_allow_html=True)
         st.write("**Relations avec les Clients**")
         relations = create_input("", 
-                               "- Support Client : Assistance technique et service après-vente\n- Formation et Sensibilisation : Sessions de formation pour les utilisateurs\n- Feedback Utilisateur : Amélioration continue basée sur les retours", 
-                               f"{key_prefix}_relations",
-                               text_area=True)
+                              "", 
+                              f"{key_prefix}_relations",
+                              text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col5:
         st.markdown(f"<div style='background-color:{bmc_colors['segments']};padding:10px;border-radius:5px;height:250px;'>", unsafe_allow_html=True)
         st.write("**Segments de Clientèle**")
         segments = create_input("", 
-                              "- ONG et Associations : Œuvrant pour l'inclusion des personnes sourdes et muettes\n- Établissements Éducatifs : Écoles et universités cherchant à sensibiliser à la langue des signes\n- Entreprises : Souhaitant créer un environnement de travail inclusif", 
-                              f"{key_prefix}_segments",
-                              text_area=True)
+                             "", 
+                             f"{key_prefix}_segments",
+                             text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Deuxième rangée: vide, Ressources Clés, vide, Canaux, vide
+    # Deuxième rangée
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
@@ -311,9 +294,9 @@ def create_business_model_canvas(key_prefix):
         st.markdown(f"<div style='background-color:{bmc_colors['ressources']};padding:10px;border-radius:5px;height:230px;'>", unsafe_allow_html=True)
         st.write("**Ressources Clés**")
         ressources = create_input("", 
-                                "- Technologie IA : Développement de l'algorithme de traduction\n- Équipe technique : Développeurs et experts en langue des signes\n- Partenariats Stratégiques : Collaboration avec des écoles et associations", 
-                                f"{key_prefix}_ressources",
-                                text_area=True)
+                               "", 
+                               f"{key_prefix}_ressources",
+                               text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col3:
@@ -323,24 +306,24 @@ def create_business_model_canvas(key_prefix):
         st.markdown(f"<div style='background-color:{bmc_colors['canaux']};padding:10px;border-radius:5px;height:230px;'>", unsafe_allow_html=True)
         st.write("**Canaux**")
         canaux = create_input("", 
-                            "- Application Mobile : Disponible sur iOS et Android\n- Portail Web : Accès en ligne pour les utilisateurs\n- Partenariats : Collaboration avec écoles, ONG et entreprises pour la diffusion", 
-                            f"{key_prefix}_canaux",
-                            text_area=True)
+                           "", 
+                           f"{key_prefix}_canaux",
+                           text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col5:
         st.write("")
     
-    # Troisième rangée: Structure de Coûts, vide, vide, vide, Sources de Revenus
+    # Troisième rangée
     col1, col2, col3 = st.columns([2, 1, 2])
     
     with col1:
         st.markdown(f"<div style='background-color:{bmc_colors['couts']};padding:10px;border-radius:5px;height:150px;'>", unsafe_allow_html=True)
         st.write("**Structure de Coûts**")
         couts = create_input("", 
-                           "- Développement Technologique : Coûts liés à la création et à la maintenance de l'application et du portail\n- Marketing et Communication : Dépenses pour la promotion et sensibilisation", 
-                           f"{key_prefix}_couts",
-                           text_area=True)
+                          "", 
+                          f"{key_prefix}_couts",
+                          text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
     with col2:
@@ -350,9 +333,9 @@ def create_business_model_canvas(key_prefix):
         st.markdown(f"<div style='background-color:{bmc_colors['revenus']};padding:10px;border-radius:5px;height:150px;'>", unsafe_allow_html=True)
         st.write("**Sources de Revenus**")
         revenus = create_input("", 
-                             "- Vente de Licences : Tarification adaptée pour écoles, entreprises et ONG\n- Abonnements : Offres mensuelles ou annuelles pour l'utilisation du service\n- Options Premium : Fonctionnalités avancées payantes", 
-                             f"{key_prefix}_revenus",
-                             text_area=True)
+                            "", 
+                            f"{key_prefix}_revenus",
+                            text_area=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
 def generate_pdf():
@@ -474,7 +457,7 @@ def generate_pdf():
         return table
     
     # Titre principal
-    story.append(Paragraph(saved_data.get('projet_titre', "Glove Voice - Rapport Complet"), title_style))
+    story.append(Paragraph(saved_data.get('projet_titre', "Rapport"), title_style))
     story.append(Spacer(1, 0.2*inch))
     
     # Présentation du projet
@@ -568,54 +551,24 @@ def generate_pdf():
             )
             story.append(cibles_table)
         else:
-            # Essayons un autre format si les données sont sous forme de liste
-            if 'marche_cibles_table' in saved_data and isinstance(saved_data['marche_cibles_table'], list):
-                cibles_list = saved_data['marche_cibles_table']
-                if cibles_list:
-                    cibles_data = [["Segment", "Bénéfices"]]
-                    for item in cibles_list:
-                        if isinstance(item, dict) and "Segment" in item and "Bénéfices" in item:
-                            cibles_data.append([item["Segment"], item["Bénéfices"]])
-                    
-                    if len(cibles_data) > 1:
-                        cibles_table = create_styled_table(
-                            cibles_data, 
-                            colWidths=[doc.width/2.0, doc.width/2.0],
-                            style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                        )
-                        story.append(cibles_table)
-                    else:
-                        # Table par défaut en cas de données manquantes
-                        default_cibles_data = [
-                            ["Segment", "Bénéfices"],
-                            ["Particuliers malentendants", "Communication facilitée au quotidien"],
-                            ["Interprètes LSF", "Outil complémentaire pour la traduction"]
-                        ]
-                        cibles_table = create_styled_table(
-                            default_cibles_data,
-                            colWidths=[doc.width/2.0, doc.width/2.0],
-                            style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                        )
-                        story.append(cibles_table)
-            else:
-                # Table par défaut en cas de données manquantes
-                default_cibles_data = [
-                    ["Segment", "Bénéfices"],
-                    ["Particuliers malentendants", "Communication facilitée au quotidien"],
-                    ["Interprètes LSF", "Outil complémentaire pour la traduction"]
-                ]
-                cibles_table = create_styled_table(
-                    default_cibles_data,
-                    colWidths=[doc.width/2.0, doc.width/2.0],
-                    style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                )
-                story.append(cibles_table)
+            # Table vide en cas de données manquantes
+            default_cibles_data = [
+                ["Segment", "Bénéfices"],
+                ["", ""],
+                ["", ""]
+            ]
+            cibles_table = create_styled_table(
+                default_cibles_data,
+                colWidths=[doc.width/2.0, doc.width/2.0],
+                style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
+            )
+            story.append(cibles_table)
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_cibles_data = [
             ["Segment", "Bénéfices"],
-            ["Particuliers malentendants", "Communication facilitée au quotidien"],
-            ["Interprètes LSF", "Outil complémentaire pour la traduction"]
+            ["", ""],
+            ["", ""]
         ]
         cibles_table = create_styled_table(
             default_cibles_data,
@@ -643,13 +596,6 @@ def generate_pdf():
                 for i in range(min(len(categories), len(points))):
                     swot_data.append([categories[i], points[i]])
         
-        # Cas 2: Format liste
-        elif isinstance(saved_data['marche_swot_table'], list) and saved_data['marche_swot_table']:
-            swot_data = [["Catégorie", "Points"]]
-            for item in saved_data['marche_swot_table']:
-                if isinstance(item, dict) and "Catégorie" in item and "Points" in item:
-                    swot_data.append([item["Catégorie"], item["Points"]])
-        
         # Si on a réussi à récupérer des données, créer le tableau
         if swot_data and len(swot_data) > 1:
             swot_table = create_styled_table(
@@ -659,13 +605,13 @@ def generate_pdf():
             )
             story.append(swot_table)
         else:
-            # Si aucune donnée n'est disponible, utiliser le tableau par défaut
+            # Table vide en cas de données manquantes
             default_swot_data = [
                 ["Catégorie", "Points"],
-                ["Forces", "• Technologie innovante\n• Équipe qualifiée"],
-                ["Faiblesses", "• Entreprise en démarrage\n• Ressources limitées"],
-                ["Opportunités", "• Marché en croissance\n• Demande pour l'accessibilité"],
-                ["Menaces", "• Concurrents établis\n• Évolution rapide de la technologie"]
+                ["Forces", ""],
+                ["Faiblesses", ""],
+                ["Opportunités", ""],
+                ["Menaces", ""]
             ]
             swot_table = create_styled_table(
                 default_swot_data,
@@ -674,13 +620,13 @@ def generate_pdf():
             )
             story.append(swot_table)
     else:
-        # Si la clé n'existe pas, utiliser le tableau par défaut
+        # Table vide en cas de données manquantes
         default_swot_data = [
             ["Catégorie", "Points"],
-            ["Forces", "• Technologie innovante\n• Équipe qualifiée"],
-            ["Faiblesses", "• Entreprise en démarrage\n• Ressources limitées"],
-            ["Opportunités", "• Marché en croissance\n• Demande pour l'accessibilité"],
-            ["Menaces", "• Concurrents établis\n• Évolution rapide de la technologie"]
+            ["Forces", ""],
+            ["Faiblesses", ""],
+            ["Opportunités", ""],
+            ["Menaces", ""]
         ]
         swot_table = create_styled_table(
             default_swot_data,
@@ -709,60 +655,28 @@ def generate_pdf():
             )
             story.append(marketing_table)
         else:
-            # Essayons un autre format si les données sont sous forme de liste
-            if 'marche_marketing_table' in saved_data and isinstance(saved_data['marche_marketing_table'], list):
-                marketing_list = saved_data['marche_marketing_table']
-                if marketing_list:
-                    marketing_data = [["Élément", "Stratégie"]]
-                    for item in marketing_list:
-                        if isinstance(item, dict) and "Élément" in item and "Stratégie" in item:
-                            marketing_data.append([item["Élément"], item["Stratégie"]])
-                    
-                    if len(marketing_data) > 1:
-                        marketing_table = create_styled_table(
-                            marketing_data, 
-                            colWidths=[doc.width/3.0, doc.width*2/3.0],
-                            style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                        )
-                        story.append(marketing_table)
-                    else:
-                        # Table par défaut en cas de données manquantes
-                        default_marketing_data = [
-                            ["Élément", "Stratégie"],
-                            ["Produit", "Gant connecté innovant et application mobile"],
-                            ["Prix", "Positionné dans la gamme moyenne-haute"],
-                            ["Place", "Vente en ligne et via revendeurs spécialisés"],
-                            ["Promotion", "Médias sociaux et partenariats associatifs"]
-                        ]
-                        marketing_table = create_styled_table(
-                            default_marketing_data,
-                            colWidths=[doc.width/3.0, doc.width*2/3.0],
-                            style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                        )
-                        story.append(marketing_table)
-            else:
-                # Table par défaut en cas de données manquantes
-                default_marketing_data = [
-                    ["Élément", "Stratégie"],
-                    ["Produit", "Gant connecté innovant et application mobile"],
-                    ["Prix", "Positionné dans la gamme moyenne-haute"],
-                    ["Place", "Vente en ligne et via revendeurs spécialisés"],
-                    ["Promotion", "Médias sociaux et partenariats associatifs"]
-                ]
-                marketing_table = create_styled_table(
-                    default_marketing_data,
-                    colWidths=[doc.width/3.0, doc.width*2/3.0],
-                    style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
-                )
-                story.append(marketing_table)
+            # Table vide en cas de données manquantes
+            default_marketing_data = [
+                ["Élément", "Stratégie"],
+                ["Produit", ""],
+                ["Prix", ""],
+                ["Place", ""],
+                ["Promotion", ""]
+            ]
+            marketing_table = create_styled_table(
+                default_marketing_data,
+                colWidths=[doc.width/3.0, doc.width*2/3.0],
+                style_commands=[('ALIGN', (0, 1), (0, -1), 'LEFT'), ('ALIGN', (1, 1), (1, -1), 'LEFT')]
+            )
+            story.append(marketing_table)
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_marketing_data = [
             ["Élément", "Stratégie"],
-            ["Produit", "Gant connecté innovant et application mobile"],
-            ["Prix", "Positionné dans la gamme moyenne-haute"],
-            ["Place", "Vente en ligne et via revendeurs spécialisés"],
-            ["Promotion", "Médias sociaux et partenariats associatifs"]
+            ["Produit", ""],
+            ["Prix", ""],
+            ["Place", ""],
+            ["Promotion", ""]
         ]
         marketing_table = create_styled_table(
             default_marketing_data,
@@ -801,75 +715,32 @@ def generate_pdf():
             )
             story.append(concurrents_table)
         else:
-            # Essayons un autre format si les données sont sous forme de liste
-            if 'marche_concurrents_table' in saved_data and isinstance(saved_data['marche_concurrents_table'], list):
-                concurrents_list = saved_data['marche_concurrents_table']
-                if concurrents_list:
-                    concurrents_data = [["Type", "Nom", "Localisation", "Description"]]
-                    for item in concurrents_list:
-                        if isinstance(item, dict) and "Type" in item and "Nom" in item and "Localisation" in item and "Description" in item:
-                            concurrents_data.append([item["Type"], item["Nom"], item["Localisation"], item["Description"]])
-                    
-                    if len(concurrents_data) > 1:
-                        concurrents_table = create_styled_table(
-                            concurrents_data, 
-                            colWidths=[doc.width/6.0, doc.width/6.0, doc.width/6.0, doc.width/2.0],
-                            style_commands=[
-                                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-                                ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                                ('BOTTOMPADDING', (0, 0), (-1, -1), 4)
-                            ]
-                        )
-                        story.append(concurrents_table)
-                    else:
-                        # Table par défaut en cas de données manquantes
-                        default_concurrents_data = [
-                            ["Type", "Nom", "Localisation", "Description"],
-                            ["Direct", "SignAll", "États-Unis", "Solution complète de traduction de langue des signes"],
-                            ["Direct", "MotionSavvy", "États-Unis", "Technologie de reconnaissance gestuelle"],
-                            ["Indirect", "Google Live T.", "Mondial", "Traduction vocale en temps réel"]
-                        ]
-                        concurrents_table = create_styled_table(
-                            default_concurrents_data, 
-                            colWidths=[doc.width/6.0, doc.width/6.0, doc.width/6.0, doc.width/2.0],
-                            style_commands=[
-                                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-                                ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                                ('BOTTOMPADDING', (0, 0), (-1, -1), 4)
-                            ]
-                        )
-                        story.append(concurrents_table)
-            else:
-                # Table par défaut en cas de données manquantes
-                default_concurrents_data = [
-                    ["Type", "Nom", "Localisation", "Description"],
-                    ["Direct", "SignAll", "États-Unis", "Solution complète de traduction de langue des signes"],
-                    ["Direct", "MotionSavvy", "États-Unis", "Technologie de reconnaissance gestuelle"],
-                    ["Indirect", "Google Live T.", "Mondial", "Traduction vocale en temps réel"]
+            # Table vide en cas de données manquantes
+            default_concurrents_data = [
+                ["Type", "Nom", "Localisation", "Description"],
+                ["", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""]
+            ]
+            concurrents_table = create_styled_table(
+                default_concurrents_data, 
+                colWidths=[doc.width/6.0, doc.width/6.0, doc.width/6.0, doc.width/2.0],
+                style_commands=[
+                    ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4)
                 ]
-                concurrents_table = create_styled_table(
-                    default_concurrents_data, 
-                    colWidths=[doc.width/6.0, doc.width/6.0, doc.width/6.0, doc.width/2.0],
-                    style_commands=[
-                        ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
-                        ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                        ('TOPPADDING', (0, 0), (-1, -1), 4),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 4)
-                    ]
-                )
-                story.append(concurrents_table)
+            )
+            story.append(concurrents_table)
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_concurrents_data = [
             ["Type", "Nom", "Localisation", "Description"],
-            ["Direct", "SignAll", "États-Unis", "Solution complète de traduction de langue des signes"],
-            ["Direct", "MotionSavvy", "États-Unis", "Technologie de reconnaissance gestuelle"],
-            ["Indirect", "Google Live T.", "Mondial", "Traduction vocale en temps réel"]
+            ["", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""]
         ]
         concurrents_table = create_styled_table(
             default_concurrents_data, 
@@ -905,10 +776,6 @@ def generate_pdf():
                 if comp_name:
                     competitor_names.append(comp_name)
             
-            # Utiliser noms par défaut si nécessaire
-            if not competitor_names:
-                competitor_names = ["Glove Voice", "SignAll", "MotionSavvy", "Kinemic", "DuoSign", "Google Live T.", "Ava"]
-            
             # Préparer les données du tableau
             if criteres:
                 # Créer des en-têtes horizontaux au lieu de verticaux
@@ -934,10 +801,10 @@ def generate_pdf():
                     colWidths=col_widths,
                     style_commands=[
                         ('ALIGN', (0, 0), (0, -1), 'LEFT'),  # Aligner première colonne à gauche
-                        ('LEFTPADDING', (0, 0), (-1, -1), 4),   # Plus de padding à gauche pour meilleure lisibilité
-                        ('RIGHTPADDING', (0, 0), (-1, -1), 4),  # Plus de padding à droite pour meilleure lisibilité
-                        ('TOPPADDING', (0, 0), (-1, -1), 4),    # Plus de padding en haut pour meilleure lisibilité
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 4)  # Plus de padding en bas pour meilleure lisibilité
+                        ('LEFTPADDING', (0, 0), (-1, -1), 4),  
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 4), 
+                        ('TOPPADDING', (0, 0), (-1, -1), 4),   
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 4) 
                     ]
                 )
                 story.append(comp_table)
@@ -949,13 +816,13 @@ def generate_pdf():
                 story.append(Paragraph("• - : Service absent", normal_style))
                 story.append(Paragraph("• T : Service partiellement présent", normal_style))
             else:
-                # Table par défaut en cas de données manquantes
+                # Table vide en cas de données manquantes
                 default_comp_data = [
-                    ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-                    ["Traduction LSF", "+", "+", "-"],
-                    ["Portabilité", "+", "-", "+"],
-                    ["Application Mobile", "+", "+", "+"],
-                    ["Autonomie", "+", "T", "+"]
+                    ["Critère", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""]
                 ]
                 comp_table = create_styled_table(
                     default_comp_data,
@@ -977,13 +844,13 @@ def generate_pdf():
                 story.append(Paragraph("• - : Service absent", normal_style))
                 story.append(Paragraph("• T : Service partiellement présent", normal_style))
         else:
-            # Table par défaut en cas de données manquantes
+            # Table vide en cas de données manquantes
             default_comp_data = [
-                ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-                ["Traduction LSF", "+", "+", "-"],
-                ["Portabilité", "+", "-", "+"],
-                ["Application Mobile", "+", "+", "+"],
-                ["Autonomie", "+", "T", "+"]
+                ["Critère", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""]
             ]
             comp_table = create_styled_table(
                 default_comp_data,
@@ -1005,13 +872,13 @@ def generate_pdf():
             story.append(Paragraph("• - : Service absent", normal_style))
             story.append(Paragraph("• T : Service partiellement présent", normal_style))
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_comp_data = [
-            ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-            ["Traduction LSF", "+", "+", "-"],
-            ["Portabilité", "+", "-", "+"],
-            ["Application Mobile", "+", "+", "+"],
-            ["Autonomie", "+", "T", "+"]
+            ["Critère", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""]
         ]
         comp_table = create_styled_table(
             default_comp_data,
@@ -1074,12 +941,12 @@ def generate_pdf():
                 )
                 story.append(comp_func_table)
             else:
-                # Table par défaut en cas de données manquantes
+                # Table vide en cas de données manquantes
                 default_comp_func_data = [
-                    ["Fonctionnalité", "Glove Voice", "SignAll", "Google Live T."],
-                    ["Traduction gestuelle", "Oui", "Oui", "Non"],
-                    ["Traduction vocale", "Oui", "Partiel", "Oui"],
-                    ["Interface utilisateur", "Intuitive", "Complexe", "Simple"]
+                    ["Fonctionnalité", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""]
                 ]
                 comp_func_table = create_styled_table(
                     default_comp_func_data,
@@ -1094,12 +961,12 @@ def generate_pdf():
                 )
                 story.append(comp_func_table)
         else:
-            # Table par défaut en cas de données manquantes
+            # Table vide en cas de données manquantes
             default_comp_func_data = [
-                ["Fonctionnalité", "Glove Voice", "SignAll", "Google Live T."],
-                ["Traduction gestuelle", "Oui", "Oui", "Non"],
-                ["Traduction vocale", "Oui", "Partiel", "Oui"],
-                ["Interface utilisateur", "Intuitive", "Complexe", "Simple"]
+                ["Fonctionnalité", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""]
             ]
             comp_func_table = create_styled_table(
                 default_comp_func_data,
@@ -1114,12 +981,12 @@ def generate_pdf():
             )
             story.append(comp_func_table)
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_comp_func_data = [
-            ["Fonctionnalité", "Glove Voice", "SignAll", "Google Live T."],
-            ["Traduction gestuelle", "Oui", "Oui", "Non"],
-            ["Traduction vocale", "Oui", "Partiel", "Oui"],
-            ["Interface utilisateur", "Intuitive", "Complexe", "Simple"]
+            ["Fonctionnalité", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""]
         ]
         comp_func_table = create_styled_table(
             default_comp_func_data,
@@ -1188,12 +1055,12 @@ def generate_pdf():
                     )
                     story.append(matrice_table)
                 else:
-                    # Table par défaut en cas de données manquantes
+                    # Table vide en cas de données manquantes
                     default_matrice_data = [
-                        ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-                        ["Facilité d'utilisation", "9", "6", "8"],
-                        ["Précision", "8", "9", "7"],
-                        ["Rapport qualité/prix", "8", "5", "7"]
+                        ["Critère", "", "", ""],
+                        ["", "", "", ""],
+                        ["", "", "", ""],
+                        ["", "", "", ""]
                     ]
                     matrice_table = create_styled_table(
                         default_matrice_data,
@@ -1208,12 +1075,12 @@ def generate_pdf():
                     )
                     story.append(matrice_table)
             else:
-                # Table par défaut en cas de données manquantes
+                # Table vide en cas de données manquantes
                 default_matrice_data = [
-                    ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-                    ["Facilité d'utilisation", "9", "6", "8"],
-                    ["Précision", "8", "9", "7"],
-                    ["Rapport qualité/prix", "8", "5", "7"]
+                    ["Critère", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""],
+                    ["", "", "", ""]
                 ]
                 matrice_table = create_styled_table(
                     default_matrice_data,
@@ -1228,12 +1095,12 @@ def generate_pdf():
                 )
                 story.append(matrice_table)
         else:
-            # Table par défaut en cas de données manquantes
+            # Table vide en cas de données manquantes
             default_matrice_data = [
-                ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-                ["Facilité d'utilisation", "9", "6", "8"],
-                ["Précision", "8", "9", "7"],
-                ["Rapport qualité/prix", "8", "5", "7"]
+                ["Critère", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""],
+                ["", "", "", ""]
             ]
             matrice_table = create_styled_table(
                 default_matrice_data,
@@ -1248,12 +1115,12 @@ def generate_pdf():
             )
             story.append(matrice_table)
     else:
-        # Table par défaut en cas de données manquantes
+        # Table vide en cas de données manquantes
         default_matrice_data = [
-            ["Critère", "Glove Voice", "SignAll", "Google Live T."],
-            ["Facilité d'utilisation", "9", "6", "8"],
-            ["Précision", "8", "9", "7"],
-            ["Rapport qualité/prix", "8", "5", "7"]
+            ["Critère", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""],
+            ["", "", "", ""]
         ]
         matrice_table = create_styled_table(
             default_matrice_data,
@@ -1271,7 +1138,7 @@ def generate_pdf():
     story.append(Spacer(1, 0.2*inch))
     
     # Business Model Canvas
-    story.append(Paragraph("7. Business Model Canvas (BMC) de Glove Voice", heading2_style))
+    story.append(Paragraph("Business Model Canvas", heading2_style))
     
     # Créer une représentation visuelle du BMC selon l'image partagée
     bmc_colors = {
@@ -1368,7 +1235,7 @@ def generate_pdf():
     
     try:
         # Créer les tableaux pour chaque rangée
-        top_table = Table(top_row_data, colWidths=[doc.width/5.0]*5)
+        top_table = Table(top_row_data, colWidths=[doc.width/5.0]*5)         
         middle_table = Table(middle_row_data, colWidths=[doc.width/5.0]*5)
         bottom_table = Table(bottom_row_data, colWidths=[doc.width/2.0, doc.width/2.0])
         
@@ -1446,10 +1313,10 @@ def generate_pdf():
     except Exception as e:
         story.append(Paragraph(f"Erreur lors de la création du Business Model Canvas: {str(e)}", normal_style))
     
-        story.append(Spacer(1, 0.2*inch))
+    story.append(Spacer(1, 0.2*inch))
     
     # Modèle d'Affaires - Tableaux détaillés
-    story.append(Paragraph("6. Modèle d'Affaires", heading2_style))
+    story.append(Paragraph("Modèle d'Affaires", heading2_style))
     
     # Fonction pour ajouter un tableau de modèle d'affaires de manière sécurisée
     def add_modele_table(story, key, title):
@@ -1573,12 +1440,12 @@ def generate_pdf():
                 )
                 story.append(projections_table)
             else:
-                # Table par défaut en cas de données manquantes
+                # Table vide en cas de données manquantes
                 default_projections_data = [
                     ["Année", "Visiteurs", "Ventes"],
-                    ["2025", "5000", "200"],
-                    ["2026", "12000", "600"],
-                    ["2027", "25000", "1200"]
+                    ["", "", ""],
+                    ["", "", ""],
+                    ["", "", ""]
                 ]
                 projections_table = create_styled_table(
                     default_projections_data,
@@ -1586,12 +1453,12 @@ def generate_pdf():
                 )
                 story.append(projections_table)
         else:
-            # Table par défaut en cas de données manquantes
+            # Table vide en cas de données manquantes
             default_projections_data = [
                 ["Année", "Visiteurs", "Ventes"],
-                ["2025", "5000", "200"],
-                ["2026", "12000", "600"],
-                ["2027", "25000", "1200"]
+                ["", "", ""],
+                ["", "", ""],
+                ["", "", ""]
             ]
             projections_table = create_styled_table(
                 default_projections_data,
@@ -1623,10 +1490,10 @@ def generate_pdf():
     story.append(Paragraph(saved_data.get('tech_title_main', "DÉTAILS TECHNIQUES"), heading1_style))
     
     # Étude technique
-    story.append(Paragraph(saved_data.get('tech_title_etude', "1. Étude technique du projet Glove Voice"), heading2_style))
+    story.append(Paragraph(saved_data.get('tech_title_etude', "1. Étude technique du projet"), heading2_style))
     
-    # Prototype Gant Intelligent
-    story.append(Paragraph(saved_data.get('tech_title_prototype', "1.1 Prototype Gant Intelligent Glove Voice"), heading2_style))
+    # Prototype
+    story.append(Paragraph(saved_data.get('tech_title_prototype', "1.1 Prototype"), heading2_style))
     
     # Partie Électronique
     story.append(Paragraph(saved_data.get('tech_title_electronique', "Partie Électronique"), styles['Heading3']))
@@ -1643,7 +1510,7 @@ def generate_pdf():
     story.append(Spacer(1, 0.2*inch))
     
     # Application Mobile
-    story.append(Paragraph(saved_data.get('tech_title_application', "1.2 Application Mobile Glove Voice"), heading2_style))
+    story.append(Paragraph(saved_data.get('tech_title_application', "1.2 Application Mobile"), heading2_style))
     for line in saved_data.get('tech_application', '').split('\n'):
         if line.strip():
             story.append(Paragraph(line, normal_style))
@@ -1733,7 +1600,7 @@ if st.sidebar.button("💾 Exporter ma sauvegarde"):
     st.sidebar.download_button(
         label="⬇️ Télécharger ma sauvegarde",
         data=json_data,
-        file_name="ma_sauvegarde_glove_voice.json",
+        file_name="ma_sauvegarde_rapport.json",
         mime="application/json"
     )
 
@@ -1741,16 +1608,8 @@ if st.sidebar.button("💾 Exporter ma sauvegarde"):
 uploaded_file = st.sidebar.file_uploader("Importer une sauvegarde", type=['json'], key="file_uploader")
 if uploaded_file is not None:
     try:
-        # Lire et charger le contenu du fichier
-        content = uploaded_file.read().decode('utf-8')
-        imported_data = json.loads(content)
-        
-        # Bouton pour confirmer l'importation
-        if st.sidebar.button("📥 Appliquer la sauvegarde"):
-            # Mettre à jour les données de session
-            st.session_state.user_data = imported_data
-            saved_data.update(imported_data)  # Mettre à jour les données actuelles
-            
+        # Utiliser la nouvelle fonction load_data_from_json
+        if load_data_from_json(uploaded_file):
             st.sidebar.success("Sauvegarde importée avec succès!")
             st.experimental_rerun()  # Actualiser pour afficher les données importées
     except Exception as e:
@@ -1769,107 +1628,77 @@ if st.sidebar.button("🗑️ Réinitialiser mes données"):
 # Page 1: Présentation du Projet
 if page == "Présentation du Projet":
     # Ajout d'un input pour changer le titre du projet
-    projet_titre = create_input("Titre du Projet", "Présentation du Projet", "projet_titre")
+    projet_titre = create_input("Titre du Projet", "", "projet_titre")
     
-    st.title(projet_titre)
+    st.title(projet_titre or "Présentation du Projet")
     
     st.header("1. Description du Projet")
-    probleme = create_input("Problématique", 
-                          "La difficulté des personnes sourdes et muettes à communiquer avec celles qui ne maîtrisent pas la langue des signes", 
-                          "pres_prob")
-    solution = create_input("Solution proposée", 
-                          "- Gant intelligent équipé de capteurs de mouvement\n- Application mobile connectée\n- Synthèse vocale des gestes traduits\n- Technologie d'IA", 
-                          "pres_solution", text_area=True)
+    probleme = create_input("Problématique", "", "pres_prob")
+    solution = create_input("Solution proposée", "", "pres_solution", text_area=True)
     
     st.header("2. Fiche d'Identité")
     identite_data = {
         "Information": ["Raison sociale", "Slogan", "Objet social", "Domaines d'activité", 
                        "Siège social", "Forme juridique", "Nombre d'associés", "Valeurs"],
         "Détail": [
-            create_input("Raison sociale", "Glove Voice", "ident_rs"),
-            create_input("Slogan", "Your Voice is HEARD", "ident_slogan"),
-            create_input("Objet social", "Dispositif de communication intelligent", "ident_objet_social"),
-            create_input("Domaines d'activité", "Technologie assistive, Informatique mobile", "ident_domaines"),
-            create_input("Siège social", "Rabat", "ident_siege"),
-            create_input("Forme juridique", "SARL", "ident_forme"),
-            create_input("Nombre d'associés", "9 membres", "ident_associes"),
-            create_input("Valeurs", "Innovation, Inclusion, Accessibilité", "ident_valeurs")
+            create_input("Raison sociale", "", "ident_rs"),
+            create_input("Slogan", "", "ident_slogan"),
+            create_input("Objet social", "", "ident_objet_social"),
+            create_input("Domaines d'activité", "", "ident_domaines"),
+            create_input("Siège social", "", "ident_siege"),
+            create_input("Forme juridique", "", "ident_forme"),
+            create_input("Nombre d'associés", "", "ident_associes"),
+            create_input("Valeurs", "", "ident_valeurs")
         ]
     }
     st.table(pd.DataFrame(identite_data))
     
     st.header("3. Objectifs et Vision")
-    objectifs = create_input("Objectifs Principaux", 
-                           "- Améliorer l'inclusion sociale\n- Faciliter l'accès à l'emploi\n- Accroître l'autonomie", 
-                           "pres_objectifs", text_area=True)
-    odd = create_input("Objectifs de Développement Durable", 
-                      "- ODD 4 : Éducation\n- ODD 8 : Travail décent\n- ODD 10 : Réduction des inégalités", 
-                      "pres_odd", text_area=True)
-    mission = create_input("Mission", "Révolutionner la communication pour les sourds/muets", "pres_mission")
-    vision = create_input("Vision", "Monde sans barrières de communication", "pres_vision")
+    objectifs = create_input("Objectifs Principaux", "", "pres_objectifs", text_area=True)
+    odd = create_input("Objectifs de Développement Durable", "", "pres_odd", text_area=True)
+    mission = create_input("Mission", "", "pres_mission")
+    vision = create_input("Vision", "", "pres_vision")
     
     st.header("4. Réalisations Accomplies")
-    realisations = create_input("Réalisations", 
-                              "- Présentation au ministre\n- Partenariat Fondation Lalla Asmae\n- Collaboration ESITH\n- Brevetage en cours", 
-                              "pres_realisations", text_area=True)
+    realisations = create_input("Réalisations", "", "pres_realisations", text_area=True)
 
 # Page 2: Analyse de Marché
 elif page == "Analyse de Marché":
     # Ajout d'un input pour changer le titre de la page
-    marche_titre = create_input("Titre de la Page", "📊 Analyse de Marché", "marche_titre")
-    st.title(marche_titre)
+    marche_titre = create_input("Titre de la Page", "", "marche_titre")
+    st.title(marche_titre or "Analyse de Marché")
     
     st.header("1. Tendances du Marché")
-    tendances = create_input("Tendances", 
-                           "- Marché technologies d'assistance en croissance\n- Sensibilisation accrue à l'inclusion\n- Avancées en IA", 
-                           "marche_tendances", text_area=True)
+    tendances = create_input("Tendances", "", "marche_tendances", text_area=True)
     
     st.header("2. Cibles Principales")
     cibles_data = {
-        "Segment": [
-            create_input("Segment 1", "Écoles/Universités", "marche_seg1"),
-            create_input("Segment 2", "Entreprises", "marche_seg2"),
-            create_input("Segment 3", "Associations", "marche_seg3")
-        ],
-        "Bénéfices": [
-            create_input("Bénéfice 1", "Communication inclusive", "marche_ben1"),
-            create_input("Bénéfice 2", "Amélioration communication", "marche_ben2"),
-            create_input("Bénéfice 3", "Formation, sensibilisation", "marche_ben3")
-        ]
+        "Segment": ["", "", ""],
+        "Bénéfices": ["", "", ""]
     }
     create_editable_table(cibles_data, "marche_cibles_table")
     
     st.header("3. Analyse SWOT")
     swot_data = {
         "Catégorie": ["Forces", "Faiblesses", "Opportunités", "Menaces"],
-        "Points": [
-            create_input("Forces", "Interface intuitive, impact social", "marche_force"),
-            create_input("Faiblesses", "Manque de notoriété, coûts", "marche_faib"),
-            create_input("Opportunités", "Programmes gouvernementaux", "marche_opp"),
-            create_input("Menaces", "Évolution technologique rapide", "marche_menace")
-    ]
+        "Points": ["", "", "", ""]
     }
     create_editable_table(swot_data, "marche_swot_table")
     
     st.header("4. Marketing Mix (4P)")
     marketing_data = {
         "Élément": ["Produit", "Prix", "Distribution", "Promotion"],
-        "Stratégie": [
-            create_input("Stratégie Produit", "Gant + app mobile, multilingue", "marche_prod"),
-            create_input("Stratégie Prix", "Tarification différenciée", "marche_prix"),
-            create_input("Stratégie Distribution", "Plateformes en ligne", "marche_dist"),
-            create_input("Stratégie Promotion", "Campagnes sensibilisation", "marche_promo")
-        ]
+        "Stratégie": ["", "", "", ""]
     }
     create_editable_table(marketing_data, "marche_marketing_table")
     
     st.header("5. Analyse Concurrentielle")
     st.subheader("Tableau Comparatif des Concurrents")
     concurrents_data = {
-        "Type": [create_input("Type 1", "Concurrent direct", "marche_type1")],
-        "Nom": [create_input("Nom 1", "", "marche_nom1")],
-        "Localisation": [create_input("Localisation 1", "", "marche_loc1")],
-                "Description": [create_input("Description 1", "", "marche_desc1", text_area=True)]
+        "Type": [""],
+        "Nom": [""],
+        "Localisation": [""],
+        "Description": [""]
     }
     create_editable_table(concurrents_data, "marche_concurrents_table")
     
@@ -1880,23 +1709,21 @@ elif page == "Analyse de Marché":
     
     st.subheader("Comparaison des Fonctionnalités Clés")
     comparison_data = {
-        "Critères": ["Traduction temps réel", "App mobile", "Multilingue"],
-        "Glove Voice": ["+", "+", "+"],
-        "Concurrent 1": ["+", "-", "-"],
-        "Concurrent 2": ["-", "+", "+"]
+        "Critères": ["", "", ""],
+        "": ["", "", ""],
+        "": ["", "", ""],
+        "": ["", "", ""]
     }
     create_editable_table(comparison_data, "marche_comparison_table")
     
     st.subheader("Analyse Comparative")
-    analyse_comp = create_input("Analyse", 
-                               "Glove Voice se distingue par son approche intégrée...", 
-                               "marche_analyse", text_area=True)
+    analyse_comp = create_input("Analyse", "", "marche_analyse", text_area=True)
     
     st.subheader("Matrice de Comparaison")
     matrice_data = {
-        "Critère": ["Support", "Langues", "Prix"],
-        "Glove Voice": ["Gant", "Arabe, Français", "Variable"],
-        "Concurrent 1": ["Caméras", "ASL", "Élevé"]
+        "Critère": ["", "", ""],
+        "": ["", "", ""],
+        "": ["", "", ""]
     }
     create_editable_table(matrice_data, "marche_matrice_table")
     
@@ -1907,150 +1734,129 @@ elif page == "Analyse de Marché":
     
     st.header("6. Modèle d'Affaires")
     create_expandable_table("Partenaires Clés", 
-                          {"Type": ["ONG"], "Rôle": ["Diffusion"]}, 
+                          {"Type": [""], "Rôle": [""]}, 
                           "modele_partenaires")
     create_expandable_table("Activités Clés", 
-                          {"Activité": ["Développement"], "Description": ["Amélioration"]}, 
+                          {"Activité": [""], "Description": [""]}, 
                           "modele_activites")
     create_expandable_table("Proposition de Valeur", 
-                          {"Élément": ["Traduction"], "Description": ["Communication"]}, 
+                          {"Élément": [""], "Description": [""]}, 
                           "modele_proposition")
     create_expandable_table("Relations Clients", 
-                          {"Type": ["Support"], "Description": ["Assistance"]}, 
+                          {"Type": [""], "Description": [""]}, 
                           "modele_relations")
     create_expandable_table("Segments Clients", 
-                          {"Segment": ["Écoles"], "Description": ["Sensibilisation"]}, 
+                          {"Segment": [""], "Description": [""]}, 
                           "modele_segments")
     create_expandable_table("Ressources Clés", 
-                          {"Type": ["IA"], "Description": ["Algorithmes"]}, 
+                          {"Type": [""], "Description": [""]}, 
                           "modele_ressources")
     create_expandable_table("Structure de Coûts", 
-                          {"Poste": ["Développement"], "Description": ["Application"]}, 
+                          {"Poste": [""], "Description": [""]}, 
                           "modele_couts")
     create_expandable_table("Canaux", 
-                          {"Canal": ["App mobile"], "Description": ["iOS/Android"]}, 
+                          {"Canal": [""], "Description": [""]}, 
                           "modele_canaux")
     create_expandable_table("Sources de Revenus", 
-                          {"Source": ["Licences"], "Description": ["Tarification"]}, 
+                          {"Source": [""], "Description": [""]}, 
                           "modele_revenus")
 
 # Page 3: Stratégie Commerciale
 elif page == "Stratégie Commerciale":
     # Ajout d'un input pour changer le titre de la page
-    strategie_titre = create_input("Titre de la Page", "📈 Stratégie Commerciale", "strategie_titre")
-    st.title(strategie_titre)
+    strategie_titre = create_input("Titre de la Page", "", "strategie_titre")
+    st.title(strategie_titre or "Stratégie Commerciale")
     
     st.header("1. Cibles Commerciales")
     st.subheader("Particuliers")
-    particuliers = create_input("Stratégie", 
-                              "Segmentation : Parents, jeunes adultes...", 
-                              "part", text_area=True)
+    particuliers = create_input("Stratégie", "", "part", text_area=True)
     
     annees = st.slider("Nombre d'années", 1, 5, 3, key="annees_slider")
     projections = {
         "Année": list(range(1, annees+1)),
-        "Visiteurs": [create_input(f"Visiteurs {i}", "500", f"vis{i}") for i in range(1, annees+1)],
-        "Ventes": [create_input(f"Ventes {i}", "50", f"ventes{i}") for i in range(1, annees+1)]
+        "Visiteurs": [create_input(f"Visiteurs {i}", "", f"vis{i}") for i in range(1, annees+1)],
+        "Ventes": [create_input(f"Ventes {i}", "", f"ventes{i}") for i in range(1, annees+1)]
     }
     create_editable_table(projections, "projections_table")
     
     st.subheader("Associations")
-    associations = create_input("Plan associations", 
-                              "20 associations ciblées...", 
-                              "assoc", text_area=True)
+    associations = create_input("Plan associations", "", "assoc", text_area=True)
     
     st.subheader("Établissements Scolaires")
-    ecoles = create_input("Plan écoles", 
-                         "Année 3 : écoles pilotes...", 
-                         "ecoles", text_area=True)
+    ecoles = create_input("Plan écoles", "", "ecoles", text_area=True)
     
     st.subheader("Entreprises")
-    entreprises = create_input("Plan entreprises", 
-                             "Secteurs cibles : Automobile...", 
-                             "entrep", text_area=True)
+    entreprises = create_input("Plan entreprises", "", "entrep", text_area=True)
 
-# Page 4: Détails Techniques (was page 5 before)
+# Page 4: Détails Techniques
 elif page == "Détails Techniques":
     # Ajout d'un input pour changer le titre de la page
-    technique_titre = create_input("Titre de la Page", "⚙️ Détails Techniques", "technique_titre")
-    st.title(technique_titre)
+    technique_titre = create_input("Titre de la Page", "", "technique_titre")
+    st.title(technique_titre or "Détails Techniques")
     
     # Nouvelle section pour l'étude technique - Avec titre modifiable
-    tech_title_main = create_input("Titre principal", "DÉTAILS TECHNIQUES", "tech_title_main")
-    tech_title_etude = create_input("Titre étude technique", "1. Étude technique du projet Glove Voice", "tech_title_etude")
-    st.header(tech_title_etude)
+    tech_title_main = create_input("Titre principal", "", "tech_title_main")
+    tech_title_etude = create_input("Titre étude technique", "", "tech_title_etude")
+    st.header(tech_title_etude or "1. Étude technique du projet")
     
     # Section prototype - Avec titre modifiable
-    tech_title_prototype = create_input("Titre prototype", "1.1 Prototype Gant Intelligent Glove Voice", "tech_title_prototype")
-    st.subheader(tech_title_prototype)
+    tech_title_prototype = create_input("Titre prototype", "", "tech_title_prototype")
+    st.subheader(tech_title_prototype or "1.1 Prototype")
     
     # Partie électronique - Avec titre modifiable
-    tech_title_electronique = create_input("Titre partie électronique", "Partie Électronique", "tech_title_electronique")
-    st.markdown(f"##### {tech_title_electronique}")
-    partie_electronique = create_input("", 
-                                     "La conception du gant intelligent repose sur plusieurs composants électroniques essentiels. Tout d'abord, les capteurs jouent un rôle crucial : les capteurs de flexion mesurent l'angle de courbure des doigts, les accéléromètres et gyroscopes détectent l'orientation et les mouvements de la main dans l'espace. Ces informations sont traitées par un microcontrôleur ESP32, choisi pour sa faible consommation d'énergie et sa connectivité Bluetooth/Wi-Fi intégrée.", 
-                                     "tech_electronique", text_area=True, height=300)
+    tech_title_electronique = create_input("Titre partie électronique", "", "tech_title_electronique")
+    st.markdown(f"##### {tech_title_electronique or 'Partie Électronique'}")
+    partie_electronique = create_input("", "", "tech_electronique", text_area=True, height=300)
     
     # Partie étude des matériaux - Avec titre modifiable
-    tech_title_materiaux = create_input("Titre partie matériaux", "Partie Étude des Matériaux", "tech_title_materiaux")
-    st.markdown(f"##### {tech_title_materiaux}")
-    partie_materiaux = create_input("", 
-                                  "Le choix des matériaux pour le gant est également déterminant pour son efficacité et son confort. Un tissu conducteur est utilisé dans les zones nécessitant la détection tactile, tandis que des matériaux élastiques et respirants composent la structure principale pour un confort optimal. Des considérations particulières sont apportées à la durabilité et à la légèreté des matériaux, avec une attention spéciale pour ceux en contact direct avec la peau.", 
-                                  "tech_materiaux", text_area=True, height=250)
+    tech_title_materiaux = create_input("Titre partie matériaux", "", "tech_title_materiaux")
+    st.markdown(f"##### {tech_title_materiaux or 'Partie Étude des Matériaux'}")
+    partie_materiaux = create_input("", "", "tech_materiaux", text_area=True, height=250)
     
     # Section application mobile - Avec titre modifiable
-    tech_title_application = create_input("Titre application mobile", "1.2 Application Mobile Glove Voice", "tech_title_application")
-    st.subheader(tech_title_application)
-    partie_application = create_input("", 
-                                   "L'application mobile Glove Voice permet une connexion rapide au gant intelligent via Bluetooth ou Wi-Fi (ESP32), assurant ainsi un transfert instantané des données. Développée simultanément pour iOS et Android avec Flutter, elle offre une interface intuitive et accessible aux utilisateurs de tous âges. L'application prend en charge plusieurs langues des signes (arabe, français, anglais) et peut être personnalisée avec des gestes spécifiques pour répondre aux besoins individuels.", 
-                                   "tech_application", text_area=True, height=250)
+    tech_title_application = create_input("Titre application mobile", "", "tech_title_application")
+    st.subheader(tech_title_application or "1.2 Application Mobile")
+    partie_application = create_input("", "", "tech_application", text_area=True, height=250)
     
     # Section algorithmes et traitement des données - Avec titre modifiable
-    tech_title_algorithmes = create_input("Titre algorithmes", "1.3 Algorithmes et Traitement des Données", "tech_title_algorithmes")
-    st.subheader(tech_title_algorithmes)
-    partie_algorithmes = create_input("", 
-                                    "Le système Glove Voice repose sur des algorithmes sophistiqués de traitement des données pour traduire avec précision les gestes en langage parlé. Les données brutes des capteurs sont d'abord filtrées pour éliminer le bruit et les variations non significatives. Ensuite, des algorithmes de reconnaissance de formes et d'apprentissage automatique (réseaux de neurones) identifient les gestes spécifiques. Cette analyse est complétée par un système de prédiction contextuelle qui améliore la fluidité des traductions.", 
-                                    "tech_algorithmes", text_area=True, height=200)
+    tech_title_algorithmes = create_input("Titre algorithmes", "", "tech_title_algorithmes")
+    st.subheader(tech_title_algorithmes or "1.3 Algorithmes et Traitement des Données")
+    partie_algorithmes = create_input("", "", "tech_algorithmes", text_area=True, height=200)
     
     # Section interface utilisateur et expérience - Avec titre modifiable
-    tech_title_interface = create_input("Titre interface utilisateur", "1.4 Interface Utilisateur et Expérience", "tech_title_interface")
-    st.subheader(tech_title_interface)
-    partie_interface = create_input("", 
-                                  "L'interface utilisateur de Glove Voice a été développée selon les principes du design centré sur l'utilisateur, avec une attention particulière aux besoins des personnes sourdes et malentendantes. Elle présente un design épuré avec des contrastes élevés pour améliorer la lisibilité, et utilise des icônes universelles facilement reconnaissables. Les menus sont organisés de manière logique et intuitive, limitant le nombre d'actions nécessaires pour accéder aux fonctionnalités principales.", 
-                                  "tech_interface", text_area=True, height=200)
+    tech_title_interface = create_input("Titre interface utilisateur", "", "tech_title_interface")
+    st.subheader(tech_title_interface or "1.4 Interface Utilisateur et Expérience")
+    partie_interface = create_input("", "", "tech_interface", text_area=True, height=200)
     
     # Section tests et validation - Avec titre modifiable
-    tech_title_tests = create_input("Titre tests et validation", "1.5 Tests et Validation", "tech_title_tests")
-    st.subheader(tech_title_tests)
-    partie_tests = create_input("", 
-                              "Le processus de validation du système Glove Voice suit une méthodologie rigoureuse pour garantir fiabilité et précision. Des tests unitaires vérifient chaque composant individuel (capteurs, algorithmes, interface) avant l'intégration. Des tests d'intégration assurent ensuite la cohérence du système complet. Enfin, des tests utilisateurs ont été menés auprès de personnes sourdes et malentendantes, ainsi que d'interprètes en langue des signes, permettant de recueillir des retours précieux et d'améliorer continuellement le système.", 
-                              "tech_tests", text_area=True, height=200)
+    tech_title_tests = create_input("Titre tests et validation", "", "tech_title_tests")
+    st.subheader(tech_title_tests or "1.5 Tests et Validation")
+    partie_tests = create_input("", "", "tech_tests", text_area=True, height=200)
     
     # Garde les sections prototype et application originales - Avec titres modifiables
-    tech_title_section2 = create_input("Titre section 2", "2. Prototype du Gant", "tech_title_section2")
-    st.header(tech_title_section2)
-    composants = create_input("Composants", 
-                            "- Capteurs flexion\n- Microcontrôleur\n- Bluetooth", 
-                            "comp", text_area=True)
+    tech_title_section2 = create_input("Titre section 2", "", "tech_title_section2")
+    st.header(tech_title_section2 or "2. Prototype")
+    composants = create_input("Composants", "", "comp", text_area=True)
     
-    tech_title_section3 = create_input("Titre section 3", "3. Application Mobile", "tech_title_section3")
-    st.header(tech_title_section3)
-    app_mobile = create_input("App mobile", 
-                            "- Reconnaissance gestuelle\n- Multilingue", 
-                            "app", text_area=True)
+    tech_title_section3 = create_input("Titre section 3", "", "tech_title_section3")
+    st.header(tech_title_section3 or "3. Application Mobile")
+    app_mobile = create_input("App mobile", "", "app", text_area=True)
     
-    tech_title_section4 = create_input("Titre section 4", "4. Processus de Production", "tech_title_section4")
-    st.header(tech_title_section4)
-    production = create_input("Production", 
-                            "Prototypage avec ESITH...", 
-                            "prod", text_area=True)
+    tech_title_section4 = create_input("Titre section 4", "", "tech_title_section4")
+    st.header(tech_title_section4 or "4. Processus de Production")
+    production = create_input("Production", "", "prod", text_area=True)
 
 # Pied de page
 st.markdown("---")
-
+st.markdown(f"Dernière mise à jour: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
 # Bouton pour effacer toutes les données (optionnel)
 if st.sidebar.button("Réinitialiser toutes les données"):
-    if os.path.exists(SAVE_FILE):
-        os.remove(SAVE_FILE)
+    # Supprimer tous les fichiers dans le dossier saved_data au lieu d'un seul fichier
+    save_dir = "saved_data"
+    if os.path.exists(save_dir):
+        for file in os.listdir(save_dir):
+            file_path = os.path.join(save_dir, file)
+            if file.endswith('.json') and os.path.isfile(file_path):
+                os.remove(file_path)
     st.rerun()
