@@ -25,29 +25,16 @@ from reportlab.pdfgen import canvas
 if 'user_data' not in st.session_state:
     st.session_state.user_data = {}
 
-# Charger les données existantes
+# Charger les données existantes - MODIFIÉ pour ne pas charger automatiquement les fichiers sauvegardés
 def load_data():
     """
-    Charge les données existantes depuis la session ou un fichier local
+    Charge uniquement les données de la session, pas des fichiers sauvegardés
     """
     # Vérifier si nous avons déjà des données dans la session
     if 'user_data' in st.session_state and st.session_state.user_data:
         return st.session_state.user_data
     
-    # Chercher les fichiers dans le dossier saved_data
-    save_dir = "saved_data"
-    if os.path.exists(save_dir):
-        try:
-            # Trouver le fichier le plus récent
-            files = [os.path.join(save_dir, f) for f in os.listdir(save_dir) if f.endswith('.json')]
-            if files:
-                newest_file = max(files, key=os.path.getctime)
-                with open(newest_file, "r", encoding='utf-8') as f:
-                    st.session_state.user_data = json.load(f)
-                    return st.session_state.user_data
-        except Exception as e:
-            st.warning(f"Erreur lors du chargement depuis le fichier: {str(e)}")
-    
+    # Ne plus charger automatiquement les fichiers
     return {}
 
 # Sauvegarder les données
@@ -76,27 +63,10 @@ def save_data(data):
         st.warning(f"Erreur lors de la sauvegarde: {str(e)}")
         return None
 
-# Fonction pour charger des données depuis un fichier JSON
-def load_data_from_json(file):
-    """
-    Charge les données à partir d'un fichier JSON
-    """
-    try:
-        # Lire le fichier JSON
-        content = file.read().decode('utf-8')
-        data = json.loads(content)
-        
-        # Mettre à jour session_state avec les données chargées
-        st.session_state.user_data = data
-        
-        return True
-    except Exception as e:
-        raise Exception(f"Erreur lors du chargement des données: {str(e)}")
-
 # Charger les anciennes entrées
 saved_data = load_data()
 
-# Fonction pour créer des inputs avec persistance
+# Fonction pour créer des inputs avec persistance - MODIFIÉ pour supprimer la sauvegarde automatique
 def create_input(label, default_value="", key=None, text_area=False, height=None):
     # Récupérer la valeur sauvegardée si elle existe
     saved_value = saved_data.get(key, default_value)
@@ -109,14 +79,13 @@ def create_input(label, default_value="", key=None, text_area=False, height=None
     else:
         user_input = st.text_input(label, value=saved_value, key=key)
     
-    # Sauvegarder automatiquement quand il y a un changement
+    # Stocker la valeur dans saved_data sans sauvegarder automatiquement
     if user_input != saved_data.get(key):
         saved_data[key] = user_input
-        save_data(saved_data)
     
     return user_input
 
-# Fonction pour les tables éditables avec persistance
+# Fonction pour les tables éditables avec persistance - MODIFIÉ pour supprimer la sauvegarde automatique
 def create_editable_table(data, key):
     # Récupérer les données sauvegardées
     saved_table = saved_data.get(key, data)
@@ -125,10 +94,9 @@ def create_editable_table(data, key):
     # Créer l'éditeur de données
     edited_df = st.data_editor(df, key=key, num_rows="dynamic")
     
-    # Sauvegarder si des modifications sont détectées
+    # Mettre à jour saved_data sans sauvegarder automatiquement
     if not edited_df.equals(df):
         saved_data[key] = edited_df.to_dict('records')
-        save_data(saved_data)
     
     return edited_df
 
@@ -188,7 +156,7 @@ def create_competitor_comparison_table(key):
         use_container_width=True
     )
     
-    # Sauvegarder les modifications
+    # Mettre à jour saved_data sans sauvegarder automatiquement
     if not edited_df.equals(df):
         # Ajouter la colonne d'index comme une colonne normale pour la sauvegarde
         edited_df_save = edited_df.reset_index()
@@ -198,11 +166,9 @@ def create_competitor_comparison_table(key):
             edited_df_save = edited_df_save.rename(columns={edited_df_save.columns[0]: criteres_column_name})
         
         saved_data[key] = edited_df_save.to_dict('list')
-        save_data(saved_data)
     
-    # Sauvegarder également le nom de la colonne des critères
+    # Mettre à jour le nom de la colonne des critères sans sauvegarde automatique
     saved_data["criteres_column_name"] = criteres_column_name
-    save_data(saved_data)
     
     # Afficher la légende
     st.write("**Légende :**")
@@ -1257,7 +1223,7 @@ def generate_pdf():
             ('BACKGROUND', (3, 0), (3, 0), colors.HexColor(bmc_colors['relations'])),
             ('VALIGN', (3, 0), (3, 0), 'TOP'),
             
-            # Segments de Clientèle
+            # Segments de Clientèle             # Segments de Clientèle
             ('BACKGROUND', (4, 0), (4, 0), colors.HexColor(bmc_colors['segments'])),
             ('VALIGN', (4, 0), (4, 0), 'TOP'),
             
@@ -1591,27 +1557,49 @@ if st.sidebar.button("📄 Générer un PDF du rapport"):
 st.sidebar.markdown("---")
 st.sidebar.subheader("Mes données")
 
+# Bouton de sauvegarde manuelle - AJOUTÉ
+if st.sidebar.button("💾 Sauvegarder mes données"):
+    filename = save_data(saved_data)
+    if filename:
+        st.sidebar.success(f"Données sauvegardées dans {filename}")
+    else:
+        st.sidebar.error("Erreur lors de la sauvegarde")
+
 # Exporter les données
-if st.sidebar.button("💾 Exporter ma sauvegarde"):
+if st.sidebar.button("⬇️ Exporter ma sauvegarde"):
     # Convertir les données en JSON pour téléchargement
     json_data = json.dumps(st.session_state.user_data, ensure_ascii=False, indent=4)
     
     # Proposer le téléchargement
     st.sidebar.download_button(
-        label="⬇️ Télécharger ma sauvegarde",
+        label="📥 Télécharger ma sauvegarde",
         data=json_data,
         file_name="ma_sauvegarde_rapport.json",
         mime="application/json"
     )
 
-# Importer les données
+# AMÉLIORATION de l'importation des fichiers
 uploaded_file = st.sidebar.file_uploader("Importer une sauvegarde", type=['json'], key="file_uploader")
 if uploaded_file is not None:
     try:
-        # Utiliser la nouvelle fonction load_data_from_json
-        if load_data_from_json(uploaded_file):
-            st.sidebar.success("Sauvegarde importée avec succès!")
-            st.experimental_rerun()  # Actualiser pour afficher les données importées
+        # Lire le contenu du fichier
+        content = uploaded_file.read().decode('utf-8')
+        data = json.loads(content)
+        
+        # Mettre à jour les données en mémoire
+        st.session_state.user_data = data
+        saved_data.update(data)  # Aussi mettre à jour saved_data
+        
+        # Afficher message de succès et bouton pour appliquer les données
+        st.sidebar.success("Sauvegarde importée avec succès!")
+        
+        # Bouton pour appliquer les données (force le rechargement)
+        if st.sidebar.button("✅ Appliquer les données importées"):
+            try:
+                st.rerun()
+            except:
+                st.sidebar.info("Veuillez rafraîchir la page pour voir les données importées")
+                
     except Exception as e:
         st.sidebar.error(f"Erreur lors de l'importation: {str(e)}")
 
@@ -1623,7 +1611,10 @@ if st.sidebar.button("🗑️ Réinitialiser mes données"):
         st.session_state.user_data = {}  # Vider les données
         saved_data.clear()  # Vider les données actuelles
         st.sidebar.success("Données réinitialisées!")
-        st.experimental_rerun()
+        try:
+            st.rerun()
+        except:
+            st.sidebar.info("Veuillez rafraîchir la page pour voir les changements")
 
 # Page 1: Présentation du Projet
 if page == "Présentation du Projet":
@@ -1849,14 +1840,3 @@ elif page == "Détails Techniques":
 # Pied de page
 st.markdown("---")
 st.markdown(f"Dernière mise à jour: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-
-# Bouton pour effacer toutes les données (optionnel)
-if st.sidebar.button("Réinitialiser toutes les données"):
-    # Supprimer tous les fichiers dans le dossier saved_data au lieu d'un seul fichier
-    save_dir = "saved_data"
-    if os.path.exists(save_dir):
-        for file in os.listdir(save_dir):
-            file_path = os.path.join(save_dir, file)
-            if file.endswith('.json') and os.path.isfile(file_path):
-                os.remove(file_path)
-    st.rerun()
